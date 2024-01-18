@@ -1,3 +1,7 @@
+Lib
+Scripts
+share
+pyvenv.cfg
 venv
 credentials.json
 wandb_key.json
