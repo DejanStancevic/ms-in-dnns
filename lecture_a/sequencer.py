@@ -91,7 +91,7 @@ if __name__ == "__main__":
     import sys
 
     parser = argparse.ArgumentParser()
-    parser.add_argument( '--length', dest = 'length', type = int )
+    parser.add_argument( '--length', dest = 'length', type = int, default = 10 )
     parser.add_argument( '--sequence', dest = 'sequence', type = str )
 
     try:
