@@ -2,7 +2,7 @@ import os
 import argparse
 import subprocess
 from datetime import datetime
-from pathlib import PurePath, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 import json
 
 from google.cloud import aiplatform, storage
@@ -113,7 +113,7 @@ def launch_package_job(args):
         cwd=args.directory,
     )
 
-    dist_dir = PurePath(args.directory, "dist", timestamp)
+    dist_dir = Path(args.directory, "dist", timestamp)
     candidates = []
     for entry in dist_dir.iterdir():
         if ".tar.gz" in entry.name:
@@ -122,7 +122,7 @@ def launch_package_job(args):
     source_name = candidates[0].name
     destination_blob_name = PurePosixPath("custom-training-python-package", f"{args.name}",
                                           f"{timestamp}/{source_name}")
-    python_package_gcs_uri = upload_blob(str(candidates[0]), str(destination_blob_name))
+    python_package_gcs_uri = upload_blob(candidates[0].as_posix(), str(destination_blob_name))
     python_module_name = args.task_module
 
     print(f"Custom Training Python Package is uploaded to: {python_package_gcs_uri}")
