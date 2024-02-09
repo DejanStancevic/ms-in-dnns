@@ -31,7 +31,7 @@ def get_wandb_key():
 
 
 class CIFARNet(nn.Module):
-    def __init__(self, num_classes=10, batchnorm = False):
+    def __init__(self, num_classes=10, batchnorm = False, dropout = False, drop_p = 0.3):
         super().__init__()
         self.features = nn.Sequential(
             nn.Conv2d(3, 64, kernel_size=3, padding=1),
@@ -41,6 +41,7 @@ class CIFARNet(nn.Module):
             nn.BatchNorm2d(64) if batchnorm else nn.Identity(),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Dropout(p=drop_p) if dropout else nn.Identity(),
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128) if batchnorm else nn.Identity(),
             nn.ReLU(inplace=True),
@@ -48,6 +49,7 @@ class CIFARNet(nn.Module):
             nn.BatchNorm2d(128) if batchnorm else nn.Identity(),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Dropout(p=drop_p) if dropout else nn.Identity(),
             nn.Conv2d(128, 256, kernel_size=3, padding=1),
             nn.BatchNorm2d(256) if batchnorm else nn.Identity(),
             nn.ReLU(inplace=True),
@@ -58,6 +60,7 @@ class CIFARNet(nn.Module):
             nn.BatchNorm2d(256) if batchnorm else nn.Identity(),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Dropout(p=drop_p) if dropout else nn.Identity(),
             nn.Conv2d(256, 512, kernel_size=3, padding=1),
             nn.BatchNorm2d(512) if batchnorm else nn.Identity(),
             nn.ReLU(inplace=True),
@@ -77,12 +80,15 @@ class CIFARNet(nn.Module):
             nn.BatchNorm2d(512) if batchnorm else nn.Identity(),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Dropout(p=drop_p) if dropout else nn.Identity(),
         )
         self.classifier = nn.Sequential(
             nn.Linear(512 * 2 * 2, 4096),
             nn.ReLU(inplace=True),
+            nn.Dropout(p=drop_p) if dropout else nn.Identity(),
             nn.Linear(4096, 4096),
             nn.ReLU(inplace=True),
+            nn.Dropout(p=drop_p) if dropout else nn.Identity(),
             nn.Linear(4096, num_classes),
         )
 
@@ -133,12 +139,14 @@ def checkpoint(epoch, model, optimizer, loss, path, file_name):
 
 def main(args):
 
-    wandb.login(key="192e0f42219be04d29d029cf52e29c51296774d6")
+    wandb.login(key=get_wandb_key())
     wandb.init(project="ms-in-dnns-cifar-net", config=args, name=args.run_name)
 
     ### LOADING DATA
 
     torch.manual_seed(0xDEADBEEF)
+
+
 
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
@@ -165,7 +173,7 @@ def main(args):
 
     ### INITIALIZING MODEL
 
-    model = CIFARNet(batchnorm=args.batchnorm)
+    model = CIFARNet(batchnorm=args.batchnorm, dropout=args.dropout)
     #model = toy_model() # Toy Model for testing the code on the laptop
     model = model.to(device)
 
@@ -219,7 +227,12 @@ def main(args):
         wandb.log({"loss": {"train": train_loss, "val": val_loss}}, step=epoch)
 
     ### EVALUATION
-        
+    
+    best_val_loss_model = torch.load(str(path) + "/Best_val_loss_CIFAR_NET_checkpoint.pt")
+    model.load_state_dict(best_val_loss_model['model_state_dict'])
+    print(f"Best Val Loss: {best_val_loss_model['loss']}",
+          f"Best Val Loss Epoch: {best_val_loss_model['epoch']}")
+
     model.eval()
     columns = ['Image', 'Ground Truth', 'Prediction']
     IMAGES = []
@@ -254,6 +267,8 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--batchnorm", action="store_true")
+    parser.add_argument("--dropout", action="store_true")
+    parser.add_argument("--augment", action="store_true")
     if "CREATION_TIMESTAMP" in os.environ:
         timestamp = os.environ["CREATION_TIMESTAMP"]
     else:
