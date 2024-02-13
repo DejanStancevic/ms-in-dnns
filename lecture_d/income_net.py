@@ -281,7 +281,7 @@ def main_2(args):
         entire_dataset, [args.train_share, 1 - args.train_share]
     )
 
-    if args.resample != 0:
+    if args.resample:
         train_dataset = ResampledDataset(train_dataset)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, num_workers=2)
@@ -295,11 +295,13 @@ def main_2(args):
     model = IncomeNet(train_dataset[0][0].shape[0], train_dataset[0][1].shape[0])
     model = model.to(device)
 
-    loss_weight = None
-    if args.loss_weight != 0:
+    if args.loss_weight:
         total_samples = len(train_dataset)
         num_class_1 = 19809 # Already calculated
         loss_weight = torch.tensor([total_samples/num_class_1, total_samples/(total_samples-num_class_1)])
+    else:
+        loss_weight = None
+
 
     criterion = nn.CrossEntropyLoss(weight=loss_weight)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
@@ -361,7 +363,7 @@ def main_2(args):
             best_val_acc = acc
             checkpoint(epoch, model, optimizer, best_val_acc, "Best_val_acc_checkpoint.pth") # Checkpointing the best val_acc model
 
-        if args.lr_scheduler != 0:
+        if args.lr_scheduler:
             scheduler.step()
 
     model.eval()
@@ -374,20 +376,20 @@ def main_2(args):
 
     ### Evaluation using confusion matrix
     
-    confusion_matrix = torch.zeros(2, 2)
+    PREDS = []
+    TRUTH = []
     for inputs, labels in val_dataset:
         inputs = inputs.to(device)
         labels = labels.to(device)
         with torch.no_grad():
             outputs = model(inputs)
 
-        preds = torch.argmax(outputs)
-        true_label = torch.argmax(labels, dim=-1)
-        confusion_matrix[true_label, preds] += 1
-    print(confusion_matrix)
-    confusion_matrix[0, :] /= confusion_matrix[0, :].sum()
-    confusion_matrix[1, :] /= confusion_matrix[1, :].sum()
-    print(confusion_matrix)
+        preds = int(torch.argmax(outputs))
+        true_label = int(torch.argmax(labels, dim=-1))
+        PREDS.append(preds)
+        TRUTH.append(true_label)
+    cm = wandb.plot.confusion_matrix(y_true=TRUTH, preds=PREDS, class_names = ['Less than 50K', 'More than 50K'])
+    wandb.log({"conf_mat": cm})
     
 
 
@@ -396,10 +398,10 @@ if __name__ == "__main__":
     parser.add_argument("--train-share", type=float, default=0.8)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--epochs", type=int, default=200)
-    parser.add_argument("--lr-scheduler", type=int, default=0)
-    parser.add_argument("--resample", type=int, default=0)
-    parser.add_argument("--loss-weight", type=int, default=0)
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--lr-scheduler", action="store_true")
+    parser.add_argument("--resample", action="store_true")
+    parser.add_argument("--loss-weight", action="store_true")
     if "CREATION_TIMESTAMP" in os.environ:
         timestamp = os.environ["CREATION_TIMESTAMP"]
     else:

@@ -146,20 +146,34 @@ def main(args):
 
     torch.manual_seed(0xDEADBEEF)
 
-
-
-    transform = transforms.Compose(
+    if args.augment:
+        train_transform = transforms.Compose([
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip(),
+            transforms.RandomRotation(10),
+            transforms.RandomResizedCrop(32, scale=(0.8, 1.0), ratio=(0.8, 1.2)),
+            transforms.ColorJitter(brightness=(0.8, 1.2), contrast=(0.8, 1.2), saturation=(0.8, 1.2), hue=0.2),
+            transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+        val_transform = transforms.Compose(
+        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        )
+    else:
+        train_transform = transforms.Compose(
+        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        )
+        val_transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
         )
 
     if "LOG_PATH" in os.environ:
         path = pl.PurePosixPath(os.environ["LOG_PATH"]).parent # /gcs/ms-.../cifar_date without /log.txt
-        train_dataset = torchvision.datasets.CIFAR10(path, train = True, transform = transform, download = True)
-        val_dataset = torchvision.datasets.CIFAR10(path, train = False, transform = transform, download = True)
+        train_dataset = torchvision.datasets.CIFAR10(path, train = True, transform = train_transform, download = True)
+        val_dataset = torchvision.datasets.CIFAR10(path, train = False, transform = val_transform, download = True)
     else:
         path = '.'
-        train_dataset = torchvision.datasets.CIFAR10("../data/CIFAR_data", train = True, transform = transform, download = True)
-        val_dataset = torchvision.datasets.CIFAR10("../data/CIFAR_data", train = False, transform = transform, download = True)
+        train_dataset = torchvision.datasets.CIFAR10("../data/CIFAR_data", train = True, transform = train_transform, download = True)
+        val_dataset = torchvision.datasets.CIFAR10("../data/CIFAR_data", train = False, transform = val_transform, download = True)
         train_dataset, _ = random_split(train_dataset, [0.01, 0.99])
 
 
@@ -173,8 +187,11 @@ def main(args):
 
     ### INITIALIZING MODEL
 
-    model = CIFARNet(batchnorm=args.batchnorm, dropout=args.dropout)
-    #model = toy_model() # Toy Model for testing the code on the laptop
+    if args.toy_model:
+        model = toy_model() # Toy Model for testing the code on the laptop
+        print("Using toy model")
+    else:
+        model = CIFARNet(batchnorm=args.batchnorm, dropout=args.dropout)
     model = model.to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -183,6 +200,7 @@ def main(args):
     ### TRAINING
 
     best_val_loss = float("inf")
+    best_val_acc = 0
 
     for epoch in range(1, args.epochs+1):
         model.train()
@@ -212,7 +230,7 @@ def main(args):
             total_loss += loss.cpu().item()
         val_loss = total_loss / len(val_loader)
 
-        if epoch%10 == 0:
+        if epoch%15 == 0:
             checkpoint(epoch, model, optimizer, val_loss, path, "Regular_CIFAR_NET_checkpoint.pt") # Checkpointing the latest model
 
         if val_loss < best_val_loss:
@@ -226,12 +244,30 @@ def main(args):
         )
         wandb.log({"loss": {"train": train_loss, "val": val_loss}}, step=epoch)
 
+        true_pos = 0
+        for inputs, labels in val_dataset:
+            inputs = inputs.to(device)
+            labels = labels
+            with torch.no_grad():
+                outputs = model(inputs[None])
+
+            prediction = int(torch.argmax(outputs).cpu())
+            true_pos += (prediction == labels)
+        acc = true_pos / len(val_dataset)
+        print(f"Val Acc: {acc}")
+        wandb.log({"validation_accuracy": {"val_acc": acc}})
+        
+
+        if acc > best_val_acc:
+            best_val_acc = acc
+            checkpoint(epoch, model, optimizer, best_val_acc, path, "Best_val_acc_CIFAR_NET_checkpoint.pt") # Checkpointing the best val_acc model
+
     ### EVALUATION
     
-    best_val_loss_model = torch.load(str(path) + "/Best_val_loss_CIFAR_NET_checkpoint.pt")
-    model.load_state_dict(best_val_loss_model['model_state_dict'])
-    print(f"Best Val Loss: {best_val_loss_model['loss']}",
-          f"Best Val Loss Epoch: {best_val_loss_model['epoch']}")
+    best_val_acc_model = torch.load(str(path) + "/Best_val_acc_CIFAR_NET_checkpoint.pt")
+    model.load_state_dict(best_val_acc_model['model_state_dict'])
+    print(f"Best Val Acc: {best_val_acc_model['loss']}",
+          f"Best Val Acc Epoch: {best_val_acc_model['epoch']}")
 
     model.eval()
     columns = ['Image', 'Ground Truth', 'Prediction']
@@ -269,6 +305,7 @@ if __name__ == "__main__":
     parser.add_argument("--batchnorm", action="store_true")
     parser.add_argument("--dropout", action="store_true")
     parser.add_argument("--augment", action="store_true")
+    parser.add_argument("--toy-model", action="store_true")
     if "CREATION_TIMESTAMP" in os.environ:
         timestamp = os.environ["CREATION_TIMESTAMP"]
     else:
