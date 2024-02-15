@@ -31,9 +31,9 @@ For more information, see the [Python Packaging User
 Guide](https://packaging.python.org/en/latest/guides/distributing-packages-using-setuptools/#working-in-development-mode).
 
 Add the functionality to log the training- and validation accuracy as well as -loss during training
-and separately for the best epoch (according to validation accuracy). Then train the model from
-scratch for 60 epochs (without dropout but with data augmentation and batchnorm). Add the loss
-and validation plots in a WandB report.
+and separately the (test-) loss and accuracy for the best epoch, (according to validation accuracy).
+Then train the model from scratch for 60 epochs (without dropout but with data augmentation and
+batchnorm). Add the loss and validation plots in a WandB report.
 
 
 ### 1.b Confusion matrix (10 Points) 
@@ -91,9 +91,13 @@ with data augmentation again) and compare the performances. Discuss your results
 As discussed in Lecture 4, it is not hard to find images which fool a well-trained classifier into
 giving the wrong prediction, even with no perceptible difference to a correctly classified image.
 This is known as adversarial vulnerability. In this exercise, you will compute adversarial examples
-for the VGG-16 model you trained on CIFAR-10.
+for the VGG-16 model you trained from scratch on CIFAR-10. Note that you find the checkpoints in the
+package folder in the Google Cloud bucket.
 
-Write a script `adv_attacks.py` which is part of the `cifar10_net` package and logs to a new WandB project. For data loading, you can import the data module from the package and you can load a training checkpoint by using the `load_from_checkpoint` classmethod of the `LightningModule` class.
+Write a script `adv_attacks.py` which is part of the `cifar10_net` package and logs to a new WandB
+project. For data loading, you can import the data module from the package and you can load
+a training checkpoint by using the `load_from_checkpoint` classmethod of the `LightningModule`
+class.
 
 Your script should have the following `argparse` arguments:
 - `--data-root` for the directory where to find the CIFAR10 data
@@ -105,12 +109,20 @@ Your script should have the following `argparse` arguments:
 - `--lr` learning rate of the optimizer (default: `1e-3`)
 - `--prob-threshold` the predicted probability of the target class at which to stop the optimization (default: `0.99`)
 
-First, find `--n-samples` samples in the validation data which lie in the source class. Then, for each class as target class, optimize the input to the network using the Adam optimizer until the maximum number of iterations is reached or the predicted probability for the target class surpasses the probability threshold. It is easiest to do this in pure PyTorch and not Lightning. You should end up with `n_samples*10` new images. Log your results into a WandB table with columns source image, ground truth class, target class, adversary, difference to original and final target probability.
+First, find `--n-samples` samples in the validation data which lie in the source class. Then, for
+each of the 10 classes as target class, optimize the input to the network using the Adam optimizer
+until the maximum number of iterations is reached or the predicted probability for the target class
+surpasses the probability threshold. It is easiest to do this in pure PyTorch and not Lightning. You
+should end up with `n_samples*10` new images. Log your results into a WandB table with columns
+source image, ground truth class, target class, adversary (the modified image), rescaled pixel-by-pixel
+difference to original and final target probability.
+For the rescaling of the difference, choose a scheme which makes the difference visible.
 
 As the source class, pick a class with high accuracy according to the confusion matrix you computed
 in the previous exercise and run the attack with the defaults given above. Discuss your results in
 a WandB report. Generate it as a PDF and provide also a link to the online report in your
 submission.
+
 
 ## Upload instructions
 
