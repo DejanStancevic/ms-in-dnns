@@ -13,3 +13,4 @@ wandb_key.json
 *.egg-info
 **/dist
 **/__pycache__
+!lecture_f/mnist_flow_weights_trained.ckpt
