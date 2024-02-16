@@ -220,6 +220,7 @@ def main(args):
 
         model.eval()
         total_loss = 0.0
+        true_pos = 0
         for inputs, labels in val_loader:
             inputs = inputs.to(device)
             labels = labels.to(device)
@@ -227,7 +228,10 @@ def main(args):
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
 
+            preds = torch.argmax(outputs, dim=-1)
+            true_pos += (preds == labels).cpu().sum()
             total_loss += loss.cpu().item()
+        acc = true_pos / len(val_dataset)
         val_loss = total_loss / len(val_loader)
 
         if epoch%15 == 0:
@@ -237,31 +241,20 @@ def main(args):
             best_val_loss = val_loss
             checkpoint(epoch, model, optimizer, best_val_loss, path, "Best_val_loss_CIFAR_NET_checkpoint.pt") # Checkpointing the best val_loss model
 
+        if acc > best_val_acc:
+            best_val_acc = acc
+            checkpoint(epoch, model, optimizer, best_val_acc, path, "Best_val_acc_CIFAR_NET_checkpoint.pt") # Checkpointing the best val_acc model
+
         print(
             f"Epoch [{epoch}/{args.epochs}]",
             f"Train Loss: {train_loss:.4f}",
             f"Val Loss: {val_loss:.4f}",
         )
         wandb.log({"loss": {"train": train_loss, "val": val_loss}}, step=epoch)
-
-        true_pos = 0
-        for inputs, labels in val_dataset:
-            inputs = inputs.to(device)
-            labels = labels
-            with torch.no_grad():
-                outputs = model(inputs[None])
-
-            prediction = int(torch.argmax(outputs).cpu())
-            true_pos += (prediction == labels)
-        acc = true_pos / len(val_dataset)
         print(f"Val Acc: {acc}")
-        wandb.log({"validation_accuracy": {"val_acc": acc}})
+        wandb.log({"validation_accuracy": {"val_acc": acc}})        
+
         
-
-        if acc > best_val_acc:
-            best_val_acc = acc
-            checkpoint(epoch, model, optimizer, best_val_acc, path, "Best_val_acc_CIFAR_NET_checkpoint.pt") # Checkpointing the best val_acc model
-
     ### EVALUATION
     
     best_val_acc_model = torch.load(str(path) + "/Best_val_acc_CIFAR_NET_checkpoint.pt")
