@@ -182,7 +182,7 @@ class LitCIFARNet(L.LightningModule):
     def on_test_epoch_end(self):
         class_names = ["airplane", "automobile", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck"]
         data = []
-        counts = self.conf_mat/self.conf_mat.sum(dim=0)
+        counts = self.conf_mat/self.conf_mat.sum(dim=1)
 
         for i in range(10):
             for j in range(10):
