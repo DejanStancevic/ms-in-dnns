@@ -116,6 +116,9 @@ class CouplingLayer(nn.Module):
             reverse - If True, we apply the inverse of the layer.
         """
         # Apply network to masked input
+        if reverse:
+            print("z", z.shape)
+            print("mask", self.mask.shape)
         z_in = z * self.mask
         nn_out = self.network(z_in)
         s, t = nn_out.chunk(2, dim=1)
@@ -158,19 +161,17 @@ class SqueezeFlow(nn.Module):
 
 
 class SplitFlow(nn.Module):
-    def __init__(self, z_dist):
+    def __init__(self, z_dist: list):
         super().__init__()
         self.z_dist = z_dist
 
-    def forward(self, z, ldj, reverse=False):
+    def forward(self, z, ldj, z_split=None, reverse=False):
         if not reverse:
             z, z_split = z.chunk(2, dim=1)
-            ldj += self.z_dist.log_prob(z_split).sum(dim=[1, 2, 3])
+            return z, z_split, ldj
         else:
-            z_split = self.z_dist.sample(sample_shape=z.shape).to(z.device)
             z = torch.cat([z, z_split], dim=1)
-            ldj -= self.z_dist.log_prob(z_split).sum(dim=[1, 2, 3])
-        return z, ldj
+            return z, ldj
 
 
 class MNISTFlow(nn.Module):
@@ -195,7 +196,7 @@ class MNISTFlow(nn.Module):
                     c_in=4,
                 )
             )
-        layer_list += [SplitFlow(z_dist), SqueezeFlow()]
+        layer_list += [SqueezeFlow(), SplitFlow(z_dist)]
         for i in range(4):
             layer_list.append(
                 CouplingLayer(
@@ -238,13 +239,27 @@ class MNISTFlow(nn.Module):
         mask = config * (1 - mask) + (1 - config) * mask
         return mask
 
-    def forward(self, imgs, reverse):
+    def forward(self, imgs, reverse=False):
         z, ldj = imgs, torch.zeros(imgs.shape[0], device=imgs.device)
-        for layer in reversed(self.layers) if reverse else self.layers:
-            z, ldj = layer(z, ldj, reverse=reverse)
+
+        if reverse:
+            z, z_split = z.chunk(2, dim=1)
+            for layer in reversed(self.layers):
+                if isinstance(layer, SplitFlow):
+                    z, ldj = layer(z, ldj, z_split, reverse=reverse)
+                else:
+                    z, ldj = layer(z, ldj, reverse=reverse)
+        else:
+            for layer in self.layers:
+                if isinstance(layer, SplitFlow):
+                    z, z_split, ldj = layer(z, ldj, reverse=reverse)
+                else:
+                    z, ldj = layer(z, ldj, reverse=reverse)
+            #squeeze = SqueezeFlow()
+            #z_split, _ = squeeze(z_split, 0)
+            z = torch.cat( (z, z_split), dim=1 )
 
         return z, ldj
-
 
 def logit_transform(x, constraint=0.9, reverse=False):
     """Transforms data from [0, 1] into unbounded space.
@@ -313,7 +328,7 @@ class MNISTFlowModule(L.LightningModule):
         return nll
 
     def log_samples(self, n_samples, stage="pred"):
-        imgs_z = self.z_dist.sample(sample_shape=(n_samples, 8, 7, 7)).to(self.device)
+        imgs_z = self.z_dist.sample(sample_shape=(n_samples, 16, 7, 7)).to(self.device)
         imgs_x, ldj = self(imgs_z, reverse=True)
         imgs_x, _ = logit_transform(imgs_x, reverse=True)
         if stage == "pred":

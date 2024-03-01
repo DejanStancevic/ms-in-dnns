@@ -78,8 +78,6 @@ class CouplingLayer(nn.Module):
 
         return z, ldj
 
-
-
 class MNISTFlow(nn.Module):
     def __init__(self, num_couplings, num_inputs=2):
         super().__init__()
@@ -117,10 +115,15 @@ def nll(z_in, ldj, z_dist: list, labels, num_classes=2):
     nll = nll.mean()
     return nll
 
+def predict(model, z_dist: list, inputs):
+    z_out, _ = model(inputs, reverse=False)
+    logprob = torch.stack( tuple([dist.log_prob(z) for dist in z_dist]) )
+    return logprob.argmax(dim=0)
+    
 
 
 if __name__ == "__main__":
-    epochs = 1000
+    epochs = 400
     batch_size = 32
     lr = 1e-4
     num_samples, split = 10000, 850
@@ -129,8 +132,8 @@ if __name__ == "__main__":
     training_data, test_data = DataSet(positions[:split], Labels[:split]), DataSet(positions[split:], Labels[split:])
     train_dataloader, test_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True), DataLoader(test_data, batch_size=batch_size, shuffle=True)
 
-    z_dist0 = torch.distributions.multivariate_normal.MultivariateNormal(torch.tensor([1., 1.]), torch.eye(2))
-    z_dist1 = torch.distributions.multivariate_normal.MultivariateNormal(torch.tensor([-1., -1.]), torch.eye(2))
+    z_dist0 = torch.distributions.multivariate_normal.MultivariateNormal(torch.tensor([10., 0.]), torch.eye(2))
+    z_dist1 = torch.distributions.multivariate_normal.MultivariateNormal(torch.tensor([-10., 0.]), torch.eye(2))
     z_dist = [z_dist0, z_dist1]
     #z_dist = torch.distributions.normal.Normal(loc=0.0, scale=1.0) # Remember to include sum in nll
     model = MNISTFlow(num_couplings=5, num_inputs=2)
@@ -141,7 +144,7 @@ if __name__ == "__main__":
     model.train()
 
     for epoch in range(epochs):
-        print(epoch)
+        #print(epoch)
         for inputs, labels in train_dataloader:
             z, ldj = model(inputs, reverse=False)
             loss = nll(z, ldj, z_dist, labels)
@@ -153,12 +156,16 @@ if __name__ == "__main__":
 
 
     model.eval()
-    z, ldj = model(torch.from_numpy(positions.astype(np.float32)), reverse=False)
+    positions = torch.from_numpy(positions.astype(np.float32))
+    z, ldj = model(positions, reverse=False)
 
     colors = np.array(['blue', 'orange'])
 
-    Labels = np.array([int(i) for i in Labels])
-
+    predictions = predict(model, z_dist, positions) 
+    Labels = torch.tensor([int(i) for i in Labels])
+    print(predictions.size())
+    print(Labels.size())
+    print( (Labels == predictions).sum() )
 
     plt.scatter(z[:, 0].detach(), z[:, 1].detach(), color=colors[Labels])
     plt.show()
