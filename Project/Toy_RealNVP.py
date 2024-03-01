@@ -132,10 +132,10 @@ if __name__ == "__main__":
     training_data, test_data = DataSet(positions[:split], Labels[:split]), DataSet(positions[split:], Labels[split:])
     train_dataloader, test_dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True), DataLoader(test_data, batch_size=batch_size, shuffle=True)
 
-    z_dist0 = torch.distributions.multivariate_normal.MultivariateNormal(torch.tensor([10., 0.]), torch.eye(2))
-    z_dist1 = torch.distributions.multivariate_normal.MultivariateNormal(torch.tensor([-10., 0.]), torch.eye(2))
+    mean = 4.0
+    z_dist0 = torch.distributions.multivariate_normal.MultivariateNormal(torch.tensor([mean, 0.]), torch.eye(2))
+    z_dist1 = torch.distributions.multivariate_normal.MultivariateNormal(torch.tensor([-mean, 0.]), torch.eye(2))
     z_dist = [z_dist0, z_dist1]
-    #z_dist = torch.distributions.normal.Normal(loc=0.0, scale=1.0) # Remember to include sum in nll
     model = MNISTFlow(num_couplings=5, num_inputs=2)
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
