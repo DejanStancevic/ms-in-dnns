@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import torchmetrics
 import lightning as L
 import wandb
 
@@ -308,24 +309,36 @@ class MNISTFlowModule(L.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.lr = lr
-        self.z_dist = [torch.distributions.multivariate_normal.MultivariateNormal(torch.normal(torch.zeros(28*28), torch.ones(28*28)),
+        self.z_dist = [torch.distributions.multivariate_normal.MultivariateNormal(torch.normal(torch.zeros(28*28),
+                                                                                                torch.ones(28*28)),
                                                                                    torch.eye(28*28)) for i in range(num_classes)]
+        
+        for dist in self.z_dist:
+            print(f"mean: {dist.loc}")
+            print(f"covariance matrix: {dist._unbroadcasted_scale_tril}")
+
         self.model = MNISTFlow(res_blocks=res_blocks)
+
+        metrics = torchmetrics.MetricCollection({ "acc": torchmetrics.classification.MulticlassAccuracy(num_classes=num_classes) })
+
+        self.val_metrics = metrics.clone(prefix="val/")
+        self.best_metrics = metrics.clone(prefix="best/")
+        self.confusion_matrix = torchmetrics.classification.MulticlassConfusionMatrix(num_classes=num_classes).to(self.device)
+        self.conf_mat = torch.zeros(num_classes, num_classes)
+
 
     def forward(self, x, reverse):
         return self.model(x, reverse=reverse)
 
-    def nll(z_in, ldj, z_dist: list, labels, num_classes=10):
-        print("Hello")
-        print(num_classes)
-        print(type(num_classes))
+    def nll(self, z_in, ldj, z_dist: list, labels, num_classes=10):
         Classes = [[] for i in range(num_classes)]
-        print("Push")
         for i in range(len(labels)):
-            print(labels[i])
             Classes[int(labels[i])].append(i)
 
-        log_qz = torch.tensor([])
+        for dist in z_dist:
+            dist.loc = dist.loc.to(z_in.device)
+            dist._unbroadcasted_scale_tril = dist._unbroadcasted_scale_tril.to(z_in.device)
+        log_qz = torch.tensor([]).to(z_in.device)
 
         for i in range(num_classes):
             log_qz = torch.cat( (log_qz, z_dist[i].log_prob(z_in[Classes[i]])), 0)
@@ -335,32 +348,62 @@ class MNISTFlowModule(L.LightningModule):
         nll = nll.mean()
         return nll
 
-    def shared_step(self, batch, metric_prefix):
+    def training_step(self, batch, batch_idx):
         imgs_x, labels = batch
         x, ldj_logit = logit_transform(imgs_x)
         imgs_z, ldj = self(x, reverse=False)
         loss = self.nll(imgs_z, ldj + ldj_logit, self.z_dist, labels)
-        self.log(f"{metric_prefix}/loss", loss, on_epoch=True, on_step=False)
-
-        if metric_prefix in ["train", "val"]:
-            self.log("step", float(self.current_epoch + 1), on_epoch=True, on_step=False)
+        self.log("train/loss", loss, on_epoch=True, on_step=False)
+        self.log("step", float(self.current_epoch + 1), on_epoch=True, on_step=False)
 
         return loss
 
-    def training_step(self, batch, batch_idx):
-        return self.shared_step(batch, "train")
-
     def validation_step(self, batch, batch_idx):
-        loss = self.shared_step(batch, "val")
+        imgs_x, labels = batch
+        x, ldj_logit = logit_transform(imgs_x)
+        imgs_z, ldj = self(x, reverse=False)
+        loss = self.nll(imgs_z, ldj + ldj_logit, self.z_dist, labels)
+        logprob = torch.stack( tuple([dist.log_prob(imgs_z) for dist in self.z_dist]) )
+        preds = logprob.argmax(dim=0)
+
+        self.val_metrics.update(preds, labels)
+        self.log("val/loss", loss, on_epoch=True, on_step=False)
+        self.log_dict(self.val_metrics, on_epoch=True, on_step=False)
+        self.log("step", float(self.current_epoch + 1), on_epoch=True, on_step=False)
+
 
     def test_step(self, batch, batch_idx):
-        return self.shared_step(batch, "best")
+        imgs_x, labels = batch
+        x, ldj_logit = logit_transform(imgs_x)
+        imgs_z, ldj = self(x, reverse=False)
+        loss = self.nll(imgs_z, ldj + ldj_logit, self.z_dist, labels)
+        logprob = torch.stack( tuple([dist.log_prob(imgs_z) for dist in self.z_dist]) )
+        preds = logprob.argmax(dim=0)
 
-    def on_fit_start(self):
-        self.val_samples_table = wandb.Table(columns=["image", "epoch"])
+        self.confusion_matrix.update(preds, labels)
+        self.conf_mat += self.confusion_matrix.compute().cpu()
+        self.best_metrics.update(preds, labels)
+        self.log("best/loss", loss, on_epoch=True, on_step=False)
+        self.log_dict(self.best_metrics, on_epoch=True, on_step=False)
+        self.log("step", float(self.current_epoch + 1), on_epoch=True, on_step=False)
 
-    def on_fit_end(self):
-        wandb.log({"val/samples": self.val_samples_table})
+    def on_test_epoch_end(self):
+        class_names = [str(i) for i in range(10)]
+        data = []
+        counts = self.conf_mat/self.conf_mat.sum(dim=1)
+
+        for i in range(10):
+            for j in range(10):
+                data.append([class_names[i], class_names[j], counts[i, j].item()])
+        fields = {"Actual": "Actual", "Predicted": "Predicted", "nPredictions": "nPredictions"}
+        conf_mat = wandb.plot_table(
+            "wandb/confusion_matrix/v1",
+            wandb.Table(columns=["Actual", "Predicted", "nPredictions"], data=data),
+            fields,
+            {"title": "confusion matrix on best epoch"},
+            split_table=True,
+            )
+        wandb.log({"best/conf_mat": conf_mat})
 
     def configure_optimizers(self):
         return optim.Adam(self.model.parameters(), lr=self.lr)
